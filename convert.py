@@ -30,7 +30,7 @@ title = '{}'
 date = '{}'
 showToc = true
 [cover]
-    image = 'cover/thm.jpg'
+    image = 'cover/thm.png'
 +++""".format(title, formatted_date)
     
     return toml_frontmatter + "\n\n" + post.content
