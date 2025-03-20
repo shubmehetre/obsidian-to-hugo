@@ -1,55 +1,82 @@
 import os
+import re
+import shutil
 import frontmatter
-import toml
-from colorama import Fore, Style, init
+from datetime import datetime
 
-# Initialize colorama for cross-platform color support
-init(autoreset=True)
+# Required directories
+OBSIDIAN_DIR = "/home/nyx/zzz/repos/obsidian-to-hugo/obsidian_files/"
+MEDIA_STORAGE = "/home/nyx/zzz/synced/Palazzo/02 Misc/MediaStorage"
+HUGO_STATIC = "/home/nyx/zzz/repos/main_site/static/img/"
+HUGO_CONTENT = "/home/nyx/zzz/repos/main_site/content/posts/Tryhackme/"
 
-def convert_obsidian_to_hugo(input_dir, output_dir):
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+def convert_yaml_to_toml(content, filename):
+    """
+    Convert YAML front matter to TOML format with proper formatting.
+    """
+    post = frontmatter.loads(content)
+    title = post.metadata.get('title', filename.replace('.md', ''))
+    created_date = post.metadata.get('Created', '')
+    
+    # Convert date format
+    if created_date:
+        dt_obj = datetime.strptime(created_date, "%d-%b-%Y %H:%M:%p")
+        formatted_date = dt_obj.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+    else:
+        formatted_date = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+05:30")
+    
+    toml_frontmatter = """+++
+title = '{}'
+date = '{}'
+showToc = true
+[cover]
+    image = 'cover/thm.jpg'
++++""".format(title, formatted_date)
+    
+    return toml_frontmatter + "\n\n" + post.content
 
-    for filename in os.listdir(input_dir):
-        if filename.endswith(".md"):
-            input_path = os.path.join(input_dir, filename)
-            output_path = os.path.join(output_dir, filename)
+def process_images_and_update_links(content, filename):
+    """
+    Find image links, copy images to Hugo's static folder, and rename them properly.
+    """
+    title_slug = re.sub(r'\s+', '-', filename.split('.')[0].lower())  # Convert title to slug
+    img_pattern = re.findall(r'!\[\]\((Pasted%20image%20[^)]+)\)', content)
+    
+    img_counter = 1
+    for img in img_pattern:
+        orig_img_name = img.replace('%20', ' ')
+        orig_img_path = os.path.join(MEDIA_STORAGE, orig_img_name)
+        
+        if os.path.exists(orig_img_path):
+            new_img_name = f"{title_slug}-{img_counter:02d}.png"
+            new_img_path = os.path.join(HUGO_STATIC, new_img_name)
+            shutil.copy2(orig_img_path, new_img_path)
+            content = content.replace(img, f'/img/{new_img_name}')  # Update the markdown link
+            img_counter += 1
+    
+    return content
 
-            with open(input_path, "r", encoding="utf-8") as file:
-                post = frontmatter.load(file)
+def convert_obsidian_to_hugo():
+    """
+    Process each markdown file in the Obsidian directory, convert front matter,
+    copy associated images, and place converted files in Hugo content directory.
+    """
+    for file in os.listdir(OBSIDIAN_DIR):
+        if file.endswith(".md"):
+            obsidian_path = os.path.join(OBSIDIAN_DIR, file)
+            hugo_path = os.path.join(HUGO_CONTENT, file)
+            
+            with open(obsidian_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            content = convert_yaml_to_toml(content, file)
+            content = process_images_and_update_links(content, file)
+            
+            with open(hugo_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            print(f"\033[92m[+] {file} => Ready to publish.\033[0m")
 
-            # Extract metadata
-            metadata = post.metadata
-            title = metadata.get("title", filename.replace(".md", ""))
-            date = metadata.get("Created", "2025-03-20T00:00:00+00:00")  # Default date if missing
-            tags = metadata.get("tags", [])
+if __name__ == "__main__":
+    convert_obsidian_to_hugo()
 
-            # Ensure tags are a list
-            if isinstance(tags, str):
-                tags = [tags]
-
-            # Convert metadata to TOML
-            hugo_metadata = {
-                "title": title,
-                "date": date,
-                "tags": tags,
-                "draft": True  # Default to draft mode
-            }
-
-            # Generate TOML frontmatter
-            toml_frontmatter = f"+++\n{toml.dumps(hugo_metadata)}+++\n"
-
-            # Combine TOML frontmatter with content
-            new_content = toml_frontmatter + post.content
-
-            # Write to output directory
-            with open(output_path, "w", encoding="utf-8") as output_file:
-                output_file.write(new_content)
-
-            # Print confirmation with vibrant green [+]
-            print(f"{Fore.GREEN}[+]{Style.RESET_ALL} {filename} => Ready to publish.")
-
-# Usage Example
-input_directory = "/home/nyx/zzz/repos/obsidian-to-hugo/obsidian_files"  # Change this to your Obsidian notes directory
-output_directory = "/home/nyx/zzz/repos/obsidian-to-hugo/hugo_files"     # Where converted Hugo files will be saved
-convert_obsidian_to_hugo(input_directory, output_directory)
